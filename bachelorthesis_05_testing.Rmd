@@ -1,0 +1,781 @@
+---
+title: "bachelorthesis_05_tests"
+author: "Max Hachemeister"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# R Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(flextable)
+  set_flextable_defaults(
+    big.mark = ".",
+    decimal.mark = ","
+    )
+
+  theme_set(theme_light())
+```
+
+# Grundsätzliche Hypothese
+
+Reproduction and Original results differ.
+
+Nullhypothesis mu0 = mu1
+Mean of Reproduction and Original are the same
+
+Alternative mu0 != mu1
+Mean of Reproduction and Original differ
+
+Weil Stichproben ursprünglich jeweils fürs gesamte Intervall, aber keine Streuungsparameter angegeben untersuche, kann die Signifikanz nicht beurteilt werden.
+Für Intervall 1 und 2 kann anhand der Frames reproduziert werden.
+Für Intervall 3 können nur die Urdaten direkt reproduziert werden.
+
+# Rechnerische Reproduktionen
+
+## Periodensummen Bachelorarbeit
+
+```{r}
+
+REM_v2 <- function(events_n,
+                   trapdays_n,
+                   dayrange = 2.7,
+                   radius = 30,
+                   angle = 55,
+                   group_size = 1,
+                   PI = pi)
+{
+  group_size *
+    (events_n / trapdays_n *
+       (pi /
+          (dayrange * radius / 1000 *
+             (2 + (
+               angle * (PI) / 180
+             )))))
+}
+
+# Übersicht Gesamtwerte 
+thesis_gesamt_original <-
+  observations_thesis_original |> 
+  select(
+    -density_v02,
+    -density_v01,
+    -error_days) |> 
+  flextable() |> 
+  set_header_labels(
+    id_deployment = "Periode",
+    events = "Ereignisse",
+    count = "Individuen",
+    trapping_days = "Fangtage",
+    group_size = "Gruppenstärke") |> 
+  autofit()
+
+save_as_docx(thesis_gesamt_original, path = "./export/tab_thesis_gesamt_original.docx")
+
+thesis_gesamt_original
+
+# rechnerische Reproduktion
+thesis_gesamt_repro <- observations_thesis_original |>
+  select(-error_days) |>
+  mutate(
+    dichte_v1_r = REM_v1(
+        events_n = events,
+        trapdays_n = trapping_days,
+        group_size = group_size
+      ),
+    dichte_v2_r = REM_v2(
+        events_n = events,
+        trapdays_n = trapping_days,
+        group_size = group_size
+      ),
+    dichte_v1_o = density_v01,
+    dichte_v2_o = density_v02,
+    group_size_o = group_size,
+    group_size_r = round(count/events,2)) |> 
+  select(id_deployment, dichte_v1_r:group_size_r) |> 
+  pivot_longer(dichte_v1_r:group_size_r) |> 
+  separate_wider_regex(name, c(Variable = ".*", "_", status = ".*")) |> 
+  pivot_wider(names_from = status,
+              values_from = value) |> 
+  mutate(
+    r = round(r, 2),
+    Variable = if_else(Variable == "group_size", "gruppenstärke", Variable),
+    repro_ok = r == o)
+
+tab_thesis_gesamt_repro <- thesis_gesamt_repro |> 
+  filter(repro_ok == FALSE) |> 
+  select(-repro_ok) |> 
+  as_grouped_data(groups = "id_deployment") |>
+  mutate(Variable = str_to_sentence(str_replace(Variable, "_", " "))) |> 
+  flextable(col_keys = c("id_deployment","Variable", "o", "r")) |>
+  set_header_labels(
+    id_deployment = "Periode",
+    r = "Reprodukt",
+    o = "Original") |>
+  autofit()
+
+save_as_docx(tab_thesis_gesamt_repro, path = "./export/tab_thesis_gesamt_repro.docx")
+
+tab_thesis_gesamt_repro
+```
+
+## REM Eingangswerte aus Tabellendaten
+
+Als nächstes wurden für alle Perioden die Gesamtwerte der Variablen
+
+- Ereigniszahl
+- Individuenzahl
+- Fangtage
+
+anhand der Tabellendaten rechnerisch reproduziert.
+
+p02 is camera level only, so have to summarise 1 and 3 first and then bind rows
+I have `observations_raw`from [bachelorthesis_04_tidy_data_and_EDA.rmd], which I can use for that purpose.
+
+### Summen reproduzieren
+
+```{r}
+# get reproduced REM values
+rem_werte_gesamt <- 
+observations_raw |> 
+  filter(source == "records") |> 
+  group_by(id_deployment) |> 
+  summarise(
+    events = sum(events),
+    count = sum(count),
+    trapping_days = sum(trapping_days)
+  )
+```
+
+### Originalsummen holen und Reproduzierbarkeit testen
+
+```{r}
+rem_eingangswerte_tabellen <-
+  observations_thesis_original |> 
+  select(
+    id_deployment,
+    events,
+    count,
+    trapping_days
+  ) |>
+  bind_rows(rem_werte_gesamt, .id = "status") |>
+  # pivot longer then wider to compare original and reproduction values
+  # for each variable
+  mutate(status = if_else(status == 1, "o", "r")) |> 
+  pivot_longer(events:trapping_days) |> 
+  pivot_wider(names_from = status,
+              values_from  = value) |> 
+  mutate(repro_ok = o == r)
+```
+
+### Aufräumen und Tabelle erstellen
+
+```{r}
+tab_rem_eingangswerte_tabellen <- 
+rem_eingangswerte_tabellen |> 
+  filter(repro_ok == FALSE) |> 
+  mutate(
+    name = case_when(
+      name == "count" ~ "Individuen",
+      name == "trapping_days" ~ "Fangtage",
+      name == "events" ~ "Ereignisse"
+      )
+    ) |> 
+  as_grouped_data(groups = "id_deployment") |> 
+  flextable(
+    col_keys = c("id_deployment", "name", "o", "r")
+  ) |> 
+  set_header_labels(
+    id_deployment = "Periode",
+    name = "Variable",
+    o = "Original",
+    r = "Reprodukt"
+  )
+
+# save as docx
+save_as_docx(tab_rem_eingangswerte_tabellen, path = "./export/tab_rem_eingangswerte_tabellen.docx")
+
+tab_rem_eingangswerte_tabellen
+```
+
+# Vergleich von Stichproben
+
+Ich suche alle Werte, die eine Verteilungsfunktion annehmen, das sind:
+
+- Ereigniszahl = Poisson-Verteilung
+  die kann ich aber einfach rechnerisch reproduzieren. Da ist der Populationsvergleich einfach too much
+
+- Individuenzahl = evtl. Normalverteilunug
+
+Für folgende Perioden hatte ich Bilddaten, um diese nachzuvollziehen
+
+- Periode 1 auf Eventebene
+- Periode 2 auf Kameraebene
+
+Alle Daten sind wie gehabt in `events_all_rwi` gesammelt.
+
+## Periode 1
+
+### Individuenzahl
+
+```{r}
+# Original
+count_o_p01 <- 
+  as_vector(
+    events_all_rwi |> 
+      filter(id_classifier == 1) |> 
+      select(count)
+    )
+
+shapiro_test_o_p01 <- 
+  shapiro.test(count_o_p01) |> 
+  tidy()
+
+# Reprodukt
+count_r_p01 <- 
+  as_vector(
+    events_all_rwi |> 
+      filter(id_classifier == 4,
+             id_deployment == 1) |> 
+      select(count)
+    )
+
+shapiro_test_r_p01 <- 
+  shapiro.test(count_r_p01) |> 
+  tidy()
+
+## bind together
+shapiro_test_all_p01 <- 
+bind_rows(
+  shapiro_test_o_p01, 
+  shapiro_test_r_p01,
+  .id = "id") |> 
+  mutate(
+    id = case_when(
+      id == 1 ~ "original",
+      TRUE ~ "repro"),
+    id_deployment = 1
+    )
+```
+
+Keine Normalität, daher Wilcoxon-Test
+
+```{r}
+wilcox_test_p01 <- 
+wilcox.test(count ~ source, 
+            data = events_all_rwi, 
+            subset = events_all_rwi$id_deployment == 1) |> 
+  tidy() |> 
+  mutate(id_deployment = 1)
+```
+
+### Ereigniszahl
+
+```{r}
+events_p01 <- events_all_rwi |> 
+  filter(id_deployment == 1) |> 
+  group_by(id_deployment, id_classifier) |> 
+  summarise(events = n())
+
+poisson_test_p01 <- 
+poisson.test(
+  x = c(
+    events_p01$events[1],
+    r = events_p01$events[2]
+    ),
+  conf.level = .1
+  ) |> 
+  tidy() |> 
+  mutate(id_deployment = 1)
+```
+
+## Periode 2 - Kameraebene
+
+### Individuenzahl
+
+Hier habe ich nur die Daten auf Kameraebene. Das habe ich schon in `records_camera_all` zusammengefasst.
+```{r}
+# original count
+
+count_o_p02 <- 
+  as_vector(
+    records_cameras_all |>
+    filter(id_deployment == 2,
+           id_classifier == 2) |> 
+    select(individuals)
+  )
+
+shapiro_test_o_p02 <- 
+  shapiro.test(count_o_p02) |> 
+  tidy()
+
+# repro count
+count_r_p02 <-   
+  as_vector(
+      records_cameras_all |>
+      filter(id_deployment == 2,
+             id_classifier == 4) |> 
+      select(individuals)
+
+    )
+
+shapiro_test_r_p02 <- 
+shapiro.test(count_r_p02) |>
+  tidy()
+
+shapiro_test_all_p02 <- 
+bind_rows(shapiro_test_o_p02, shapiro_test_r_p02, .id = "id") |> 
+  mutate(id = case_when(id == 1 ~ "original",
+                        TRUE ~ "repro"),
+         id_deployment = 2)
+
+```
+
+Keine Normalität, daher Wilcoxon-Test
+
+```{r}
+wilcox_test_p02 <- 
+wilcox.test(individuals ~ source, 
+            data = records_cameras_all, 
+            subset = records_cameras_all$id_deployment == 2) |> 
+  tidy() |> 
+  mutate(id_deployment = 2)
+```
+
+### Ereigniszahl
+
+```{r}
+events_p02 <- records_cameras_all |> 
+  filter(id_deployment == 2) |> 
+  group_by(id_deployment, id_classifier) |> 
+  reframe(events = sum(events))
+
+poisson_test_p02 <- 
+  poisson.test(
+  x= c(events_p02$events[1],
+       events_p02$events[2]
+  ),
+  conf.level = .1
+  ) |> 
+  tidy() |> 
+  mutate(id_deployment = 2)
+```
+
+
+# Periode 1
+## Rechnerische Reproduktion
+```{r}
+# get original values
+original_p01 <- observations_thesis_original |> 
+  filter(id_deployment == 1) |>
+  select(!density_v02) |>
+  rename(density = density_v01) |> 
+  pivot_longer(events:density, names_to = "Variable", values_to = "original")
+
+# calculate from original values
+repro_p01 <- observations_thesis_original |> 
+  filter(id_deployment == 1) |>
+  reframe(id_deployment = id_deployment,
+          group_size= count/events,
+         density = REM_v1(
+           events = events,
+           trapdays = trapping_days,
+           group_size = group_size
+         )) |> 
+  pivot_longer(group_size:density, names_to = "Variable", values_to = "repro") |> 
+  mutate(Quelle = "bachelorarbeit")
+
+library(flextable)
+# join together
+left_join(original_p01, repro_p01) |> 
+  mutate(repro = round(repro, 2),
+         erfolg = if_else(!is.na(repro), repro == original, NA)) |>
+arrange(Quelle)
+```
+
+## repro from records
+```{r}
+# get values from data
+repro_records_p01 <- records_cameras_all |> 
+  filter(id_deployment == 1, source == "records") |> 
+  group_by(id_deployment) |> 
+  summarise(events = sum(events),
+            count = sum(individuals),
+            group_size = round(count/events,2)) |> 
+  pivot_longer(events:group_size, values_to = "repro", names_to = "Variable") |> 
+  mutate(Quelle = "tabellendaten")
+
+left_join(original_p01, repro_records_p01) |> 
+  mutate(success = original == repro)
+
+```
+
+## repro from frames
+
+```{r}
+library(tidymodels)
+# get original frames from records
+records_original_p01 <- events_all_rwi |> 
+  filter(id_deployment == 1, source == "records")
+
+records_repro_p01 <- events_all_rwi |> 
+  filter(id_deployment == 1, source == "frames")
+
+# test counts
+test_counts <- 
+t.test(x = records_original_p01$count,
+       y = records_repro_p01$count,
+       conf.level = .1) |> 
+  tidy()
+
+
+t.test(
+  count ~ source, 
+  data = events_all_rwi, 
+  subset = events_all_rwi$id_deployment == 1,
+  mu = 0,
+  conf.level = .1)
+
+# test event-rate
+#test_events <- 
+poisson.test(x = count(records_original_p01)$n, 
+             T = 1, 
+             r = count(records_repro_p01)$n, 
+             conf.level = .1) |> 
+  tidy()
+
+bind_rows(events = test_events, counts = test_counts, .id = "id")
+```
+
+
+# Periode 1 und 2 zusammen
+
+## Shapiro-Wilks-Test
+```{r}
+bind_rows(
+  shapiro_test_all_p01,
+  shapiro_test_all_p02,
+)
+```
+
+
+## Testergebnisse
+
+```{r}
+
+repro_tests_all <- 
+bind_rows(
+  wilcox_test_p01, 
+  wilcox_test_p02
+  ) |> 
+  bind_rows(
+    bind_rows(
+      poisson_test_p01,
+      poisson_test_p02
+      ),
+    .id = "variable"
+    ) |> 
+  mutate(
+    variable = case_when(
+      variable == 1 ~ "Individuenzahl",
+      TRUE ~ "Ereigniszahl"
+    ),
+    repro_ok = p.value >= .9
+  ) |> 
+  arrange(id_deployment)
+
+tab_repro_tests_all<- 
+repro_tests_all|> 
+  arrange(
+    id_deployment
+    ) |> 
+  as_grouped_data(
+    group = "id_deployment"
+  ) |> 
+  flextable(
+    col_keys = c(
+      "id_deployment",
+      "variable",
+      "method",
+      "statistic",
+      "p.value",
+      "repro_ok"
+    )
+  ) |>
+  set_header_labels(
+    id_deployment = "Periode",
+    variable = "Variable",
+    method = "Testverfahren",
+    statistic = "Teststatistik",
+    p.value = "P-Wert",
+    repro_ok = "reproduziert"
+  ) |> 
+  autofit()
+
+# save as .docx
+save_as_docx(tab_repro_tests_all, path = "./export/tab_repro_tests_all.docx")
+```
+
+## Aufräumen Tabelle erstellen
+
+```{r}
+
+tab_shapiro_tests <- 
+bind_rows(
+  shapiro_test_all_p01,
+  shapiro_test_all_p02,
+  ) |> 
+  # set p.value to scientific notation
+  mutate(
+    p.value = formatC(
+      p.value, 
+      format = "e", 
+      digits = 3,
+      decimal.mark = ","
+      )) |> 
+  as_grouped_data(
+    groups = "id_deployment"
+    ) |>
+  flextable(
+    col_keys = c(
+      "id_deployment", 
+      "id",
+      "statistic",
+      "p.value"
+      )
+    ) |> 
+  set_header_labels(
+    id_deployment = "Periode",
+    id = "Art",
+    statistic = "Statistik",
+    p.value = "P-Wert"
+  ) |> 
+  autofit()
+
+# save as docx
+
+save_as_docx(tab_shapiro_tests, path = "./export/tab_shapiro_tests.docx")
+
+```
+
+## Plot Histogramme Individuenzahl
+
+### how to a ad prefix to a number
+```{r}
+bind_rows(histo_p1, histo_p2) |> 
+  mutate(id_deployment =  str_replace(id_deployment, "(.)", "Periode \\1" ))
+
+```
+
+
+```{r}
+histo_p1 <- 
+  events_all_rwi |>
+  filter(id_deployment == 1) |> 
+  mutate(id_classifier = case_when(id_classifier == 4 ~ "Reprodukt",
+                                   TRUE ~ "Original"))
+
+histo_p2 <- 
+  records_cameras_all |>
+  filter(id_deployment == 2) |> 
+  mutate(id_classifier = case_when(id_classifier == 4 ~ "Reprodukt",
+                                   TRUE ~ "Original"),
+         count = individuals)
+
+  
+bind_rows(histo_p1, histo_p2) |> 
+  # add prefix "Periode " to 'deployment_id'
+  mutate(id_deployment =  str_replace(id_deployment, "(^)", "Periode \\1" )) |> 
+  ggplot(aes(count, fill = id_classifier, color = id_classifier)) +
+  geom_density(alpha = 2/3) +
+  scale_fill_brewer(palette = "Pastel1") +
+  scale_y_continuous(labels = label_percent()) +
+  facet_wrap(~ id_deployment,
+             scales = "free"
+             )+
+  labs(title = "Histogramme für originale und reproduzierte Individuenzahl",
+       subtitle = "Periode 1 bezogen auf Ergeignisse und hergeleitet aus den Bilddaten
+Periode 2 bezogen auf Kameras und hergeleitet aus den Tabellendaten",
+       x = "Individuenzahl",
+       y = "Relative Häufigkeit",
+       fill = NULL,
+       color = NULL
+  ) +
+  theme(legend.position = "inside",
+        legend.position.inside = c(.95, .95),
+        legend.justification = c("right", "top"))
+
+ggsave("./export/histogramme_individuenzahl.png",
+       units = "mm",
+       width = 148,
+       height = 105)
+```
+
+# Alle zusammen
+
+```{r}
+# die brauche ich alle
+thesis_gesamt_repro
+rem_eingangswerte_tabellen
+repro_tests_all
+
+# alle zu einem dataframe bündeln
+repro_summary <- 
+  bind_rows(
+  thesis_gesamt_repro |> 
+    select(
+      id_deployment,
+      Variable,
+      repro_ok
+    ),
+  rem_eingangswerte_tabellen |> 
+    select(
+      id_deployment,
+      Variable = name,
+      repro_ok
+    ),
+  repro_tests_all |> 
+    select(
+      id_deployment,
+      Variable = variable,
+      repro_ok
+    )
+) 
+
+
+# zusammenfassen und Gesamt berechnen
+## DONE Summarise Across noch ausprobieren
+
+repro_summary_toplevel <- 
+repro_summary |>  
+  summarise(
+    repro_tests = n(),
+    reproduziert = sum(repro_ok == TRUE),
+    reproduzierbarkeit = reproduziert / repro_tests,
+    .by = "id_deployment"
+  )
+
+tab_repro_summary_toplevel <-
+# Reihe für Gesamt berechnen und hinzufügen
+repro_summary_toplevel |>
+  bind_rows(
+    repro_summary_toplevel |> 
+      summarise(across(
+        repro_tests:reproduziert,
+        sum),
+        reproduzierbarkeit = reproduziert / repro_tests,
+        id_deployment = 4
+        )
+    ) |>
+  # Gesamt einfügen und alles faktorisieren
+  mutate(
+    id_deployment = case_when(
+      id_deployment == 4 ~ "Gesamt",
+      TRUE ~ as.character(id_deployment)
+      )
+    ) |> 
+  # tabelle erstellen
+  flextable() |> 
+  set_header_labels(
+    id_deployment = "Periode",
+    repro_tests = "Anzahl Tests",
+    reproduziert = "Anzahl erfolgreich",
+    reproduzierbarkeit = "Reproduzierbarkeit"
+  ) |> 
+  colformat_double(
+    digits = 2
+  ) |> 
+  # Linie einfügen, um Gesamt visuell abzugrenzen 
+  hline(i = 3,
+        border = fp_border_default(color = "grey67")) |> 
+  autofit()
+
+save_as_docx(
+  tab_repro_summary_toplevel, 
+  path = "./export/tab_repro_summary_toplevel.docx")
+
+```
+
+
+# Bin
+
+1, 2 Stichprobeneinheit ist Intervall, Variable ist Individuenzahl, Ursprung ist Bilddaten
+```{r}
+events_all_rwi |> 
+  filter(id_deployment == 1) |> 
+  ggplot(aes(count, fill = source)) +
+  geom_density(alpha = .5)
+
+events_all_rwi |> 
+  filter(id_deployment == 1) |> 
+  ggplot(aes(count, fill = source)) +
+  geom_boxplot(alpha = .5) +
+  coord_flip()
+
+test <- events_all_rwi |> 
+  filter(id_deployment == 1 & source == "frames")
+  
+shapiro.test(test$count)
+
+test2 <- events_all_rwi |> 
+  filter(id_deployment == 1 & source == "records")
+
+shapiro.test(test2$count)
+
+
+events_all_rwi |> 
+  group_by(id_deployment, source) |> 
+  reframe(mean = mean(count),
+            sd = sd(count),
+            var = var(count),
+            quantile_5 = quantile(count, .05),
+            median = median(count),
+            quantile_95 = quantile(count, .95))
+
+events_all_rwi |> 
+  summary()
+
+wilcox.test(count ~ source, 
+            data = events_all_rwi, 
+            subset = events_all_rwi$id_deployment == 1)
+
+t.test(count~source,events_all_rwi |> 
+              filter(id_deployment == 1 ) |> 
+              select(count, source))
+
+events_all_rwi |> 
+  count(id_deployment, source)
+
+poisson.test(151, r = )
+poisson.test(254, r = 268)
+
+observations_deployments_repro 
+
+table1(x = ~count + events | as.factor(id_deployment) * source,
+       data = observations_cameras_all |> filter(source != "thesis"),
+       overall = FALSE)
+```
+
+```{r}
+events_all_rwi |>
+  filter(id_deployment == 1) |> 
+  count(source)
+
+poisson.test(140, T = 1, r = 173, conf.level = 0.1)
+
+
+tibble(x = rpois(10000, 173)) |> 
+  ggplot(aes(x)) +
+  geom_histogram()
+```
+
+
+1 und 2 Stichprobeneinheit ist Kamera, Variable ist Anzahl Events, Ursprung ist Bilddaten
+
+1, 2 Stichprobeneinheitt ist Intervall, Variable ist Individuenzahl, Ursprung ist Bilddaten
+3 Stichprobeneinheit ist Kamera, Variable ist Anzahl Events, Ursprung ist Urdaten
+3 Stichprobeneinheit ist Intervall, Vaariable ist Individuenzahl, Ursprung ist Urdaten
+

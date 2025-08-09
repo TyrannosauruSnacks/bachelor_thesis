@@ -1,0 +1,208 @@
+---
+title: "bachelor_prep_data"
+author: "Max Hachemeister"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readODS)
+theme_set(theme_light())
+```
+
+# 1 import Data
+
+The data from the other bachelor thesis' were stored in spreadsheets. As a first step I merged them togehter and collected some other information several sheets, which I did in `libre office`. However I would like to work as much as possible in R, to preserve the raw data as much as possible, aswell as the reproducibility of my work.
+
+So here I start from this still pretty raw `.ods` file.
+
+```{r}
+# here I import the table for deployment from the .ods database and save it as a tibble with the same name
+events_records <- read_ods(path = "~/bachelor_thesis/R/work/cameratraps_database_v02_1.ods", 1)
+
+# fields with "NA" are NA, instead of just empty fields
+cameras <- read_ods(path = "~/bachelor_thesis/R/work/cameratraps_database_v02_1.ods", 2, na = "NA")
+
+# these have the beginning and end of each deployment, which I need to calculate the active/trapping days of each camera
+deployments <- read_ods(path = "~/bachelor_thesis/R/work/cameratraps_database_v02_1.ods", 3)
+```
+
+Take a look.
+
+```{r}
+events_records
+cameras
+deployments
+```
+
+# 2 tidy data
+
+## 2.1 tidy dates with the `lubridate`-package
+
+```{r}
+events_records <- events_records |>
+  mutate(date = dmy(date))
+
+cameras <- cameras |>
+  mutate(
+    error1_start = dmy(error1_start),
+    error1_end = dmy(error1_end),
+    error2_start = dmy(error2_start),
+    error2_end = dmy(error2_end)
+  )
+
+deployments <- deployments |>
+  mutate(deploy_start = dmy(deploy_start),
+         deploy_end = dmy(deploy_end))
+
+```
+
+## 2.2 solve entry error
+
+dir `lfb6` exists two times, because of an entry error on my end, while moving the original data into the `.ods`-spreadsheet.
+
+```{r}
+# show all entries that have the camera_name "lfb06"
+cameras |> 
+  filter(camera_name == "lfb06")
+
+# can fix that with `if_else`
+cameras <- cameras |> 
+  mutate(station_name = if_else(camera_name == "lfb06", "c", station_name))
+
+cameras |> 
+  filter(camera_name == "lfb06")
+```
+
+## 2.3 add visual camera names
+
+The camera naming seems off, when viewed on a map. Take a look.
+
+```{r}
+cameras |>
+  ggplot(aes(utm_x, utm_y,  color = station_name, label = camera_name)) +
+  geom_point() +
+  geom_text(vjust = 1.9, hjust = .5, color = "grey50")
+```
+
+
+So I'm going to rename them with ascending numbers per group, from left to right. Fo that I'll create a `tibble`.
+
+```{r}
+rename_cameras <- tribble(
+  ~camera_name, ~new_name,
+  "lfb12", "e1",
+  "lfb10", "e2",
+  "lfb11", "e3",
+  "lfb19", "e4",
+  "lfb16", "d1",
+  "lfb13", "d2",
+  "lfb18", "d3",
+  "lfb14", "d4",
+  "lfb20", "c1",
+  "lfb15", "c2",
+  "lfb06", "c3",
+  "lfb17", "c4",
+  "lfb07", "b1",
+  "lfb09", "b2",
+  "lfb01", "b3",
+  "lfb03", "b4",
+  "lfb04", "a1",
+  "lfb05", "a2",
+  "lfb08", "a3",
+  "lfb02", "a4"
+)
+
+rename_cameras
+
+```
+
+And then join it with the `cameras`, copy the `camera_name` values to a new column and write the `new_name` values to `camera_name`.
+Then we can loose the `new_name` column.
+
+```{r}
+cameras |> 
+  left_join(rename_cameras,
+            by = "camera_name") |> 
+  mutate(camera_name_old = camera_name,
+         camera_name = new_name) |> 
+  select(!new_name)
+```
+
+Let's redo the map to see the result.
+
+```{r}
+cameras |> 
+  left_join(rename_cameras,
+            by = "camera_name") |> 
+  mutate(camera_name_old = camera_name,
+         camera_name = new_name) |> 
+  select(!new_name)|> 
+  ggplot(aes(utm_x, utm_y, label = camera_name,  color = station_name)) +
+  geom_point() +
+  geom_text(vjust = 0, hjust = -0.2, color = "grey50") +
+  scale_color_brewer(palette = "Set2")
+```
+
+And safe it to the the object
+
+```{r}
+cameras <- cameras |> 
+  left_join(rename_cameras,
+            by = "camera_name") |> 
+  mutate(camera_name_old = camera_name,
+         camera_name = new_name) |> 
+  select(!new_name)
+```
+
+### And safe the plots for comparison for the report
+
+```{r}
+cameras |> 
+  filter(station_name == "b" | station_name == "c") |> 
+  pivot_longer(cols = c(camera_name_old, camera_name)) |> 
+  mutate(name = if_else(name == "camera_name", "Benennung neu", "Benennung alt")) |> 
+  ggplot(aes(utm_x, utm_y,  color = station_name, label = value)) +
+  geom_point(size = 4) +
+  geom_text(vjust = -0.5, hjust = -.3, color = "grey50", size = 4) +
+  scale_x_continuous(expand = expansion(mult = .3),
+                     labels = NULL)+
+  scale_y_continuous(expand = expansion(mult = .1),
+                     labels = NULL) +
+  facet_wrap(~name) +
+  labs(color = "Gruppe") +
+  theme(legend.position = "inside",
+        legend.position.inside = c(.99, .01),
+        legend.justification = c("right", "bottom")
+        )
+
+ggsave("./kameras_neu.png",
+       units = "mm",
+       width = 148,
+       height = 105)
+```
+
+## 2.3 join `deployment` and `cameras`
+
+I will also rename `am=am` to something more codeable and as `error2_start` and `error2_end` are empty, I will loose them.
+
+```{r}
+cameras <- cameras |>
+  left_join(select(deployments, 1:3), by = "id_deployment") |>
+  rename(am_is_am = `am=am`) |> 
+  select(!error2_start:error2_end)
+```
+
+## 2.4 check results
+
+```{r}
+events_records
+cameras
+deployments
+```
+
+# 3. Next
+
+From here we would go to extract the data for the events from the metadata of the image files. This is done with the `camtrapR` package. But this is a whole adventure for itself, so I do this in an extra notebook and from there we go to the next one, which will be merging it all together and do some exploratory Data analysis.

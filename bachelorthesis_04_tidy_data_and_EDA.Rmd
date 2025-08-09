@@ -1,0 +1,920 @@
+---
+title: "bachelorthesis_tidy_data_and_EDA"
+author: "Max Hachemeister"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+theme_set(theme_light())
+```
+
+# 1 REM-Calculation
+
+## 1.1 create REM function
+I need
+  - n-events
+  - n-trapping days
+  - average group size
+    - sum of count / n-events
+  - detection distance
+  - detection radius
+  - trapping effort
+  - PI
+  - average dayrange
+  
+```{r}
+REM_v1 <- function(events_n,
+                   trapdays_n,
+                   dayrange = 2.7,
+                   radius = 15,
+                   angle = 48,
+                   group_size = 1,
+                   PI = pi)
+{
+  group_size *
+    (events_n / trapdays_n *
+       (pi /
+          (dayrange * radius / 1000 *
+             (2 + (
+               angle * (PI) / 180
+             )))))
+}
+
+REM_v2 <- function(events_n,
+                   trapdays_n,
+                   dayrange = 2.7,
+                   radius = 30,
+                   angle = 55,
+                   group_size = 1,
+                   PI = pi)
+{
+  group_size *
+    (events_n / trapdays_n *
+       (pi /
+          (dayrange * radius / 1000 *
+             (2 + (
+               angle * (PI) / 180
+             )))))
+}
+```
+
+# 2 Get Results/Observations per period and variation
+I want to create a table named `observations` in which I can compare all the findings on different levels.
+I need the following columns at least:
+- reference
+- reference_id
+- reference_name
+- id_deployment
+- deploy_days
+- problem_days
+- trapping_days
+- source
+- events
+- count
+- group_size
+- REM_density
+
+## 2.1 thesis results
+So these are the hard facts as from the thesis' I got:
+
+density_v01 
+density_v02
+events_n
+indivduals_n
+avg_group_size
+
+This is a tibble with the original values, as from the results section of each thesis.
+```{r}
+observations_thesis_original <- tribble(
+  ~id_deployment, ~events, ~count, ~group_size, ~trapping_days, ~error_days, ~density_v01, ~density_v02,
+  1, 140, 748, 5.34, 729, 31, 28.03, 13.44,
+  2, 268, 661, 2.47, 1311, 29, 13.77, 6.61,
+  3, 322, 932, 2.95, 1036, 160, 25.05, 12.01
+)
+```
+
+make a little test
+```{r}
+observations_thesis_original |> 
+  mutate(group_size_calc = round(count / events, 2)) |> 
+  filter(group_size_calc != group_size) |>
+  select(id_deployment, group_size, group_size_calc)
+```
+
+Okay, so in `deployment 3` there there seems to be a calculation error.
+I will note that, but keep the correct calculated group size for further comparison.
+So I will change that value in the original column of `deployment 3`.
+```{r}
+observations_thesis <- observations_thesis_original |> 
+  mutate(group_size = if_else(id_deployment == 3, round(count / events, 2), group_size))
+```
+
+Ah yeah, and now I have to check whether at least the density would be correct.
+I expect the density decrease with the group size.
+```{r}
+observations_thesis |> 
+  filter(id_deployment == 3) |> 
+  mutate(density_v01_new = REM_v1(events_n = events,
+                               group_size = group_size,
+                               trapdays_n = trapping_days
+                               )) |> 
+  select(density_v01,density_v01_new)
+```
+As expected, but how about the other periods.
+```{r}
+observations_thesis |>
+  mutate(
+    density_v01_new = REM_v1(
+      events_n = events,
+      group_size = group_size,
+      trapdays_n = trapping_days
+    )
+  ) |>
+  select(id_deployment, density_v01, density_v01_new)
+```
+Only one is somewhat close to my calculations.
+Maybe because the `pi` in R is "just" six decimal places.
+But I'm not gonna go down that road.
+```{r}
+pi
+```
+
+
+Note that and keep the new values for further comparison.
+```{r}
+observations_thesis <- observations_thesis |>
+  mutate(
+    density_v01 = if_else(
+      id_deployment == 3,
+      REM_v1(
+        events_n = events,
+        group_size = group_size,
+        trapdays_n = trapping_days
+      ),
+      density_v01
+    ),
+    density_v02 = if_else(
+      id_deployment == 3,
+      REM_v2(
+        events_n = events,
+        group_size = group_size,
+        trapdays_n = trapping_days
+      ),
+      density_v02
+    )
+  )
+
+observations_thesis
+```
+
+To compare further steps in the process I will add the other columns.
+- reference
+- reference_id
+- reference_name
+- id_deployment
+- deploy_days
+- error_days
+- trapping_days
+- source
+- events
+- count
+- group_size
+- rem_density
+
+I see that I need to give the `deployments`-table a `name` column first, because I will also need this for joining the other tables aswell.
+```{r}
+deployments <- deployments |> 
+  mutate(name = str_c("deployment_", as.character(id_deployment)))
+
+deployments
+```
+
+Now I will create the other columns for to prepare the `obervations`-table.
+I will infer the deploy days by: `error_days + trapping_days`
+```{r}
+observations_thesis_prep <- 
+  observations_thesis |> 
+  mutate(reference = "deployment",
+         reference_id = id_deployment,
+         reference_name = str_c("deployment_", as.character(id_deployment)),
+         deploy_days = error_days + trapping_days,
+         # error_days already there
+         # trapping_days already there
+         source = "thesis",
+         # events already there
+         # count already there
+         # group_size already there
+         rem_density_1 = density_v01,
+         rem_density_2 = density_v02
+         ) |>
+  select(
+    reference,
+    reference_id,
+    reference_name,
+    #id_deployment = id_deployment,
+    source,
+    events:group_size,
+    deploy_days,
+    error_days,
+    trapping_days,
+    rem_density_1,
+    rem_density_2
+  )
+
+observations_thesis_prep
+```
+
+##2.2 record level
+All the information from the records are stored in `events_all_rwi`
+Let's take a look
+```{r}
+events_all_rwi
+```
+For later comparison I will add a source column, as I did with the thesis results
+```{r}
+events_all_rwi <- events_all_rwi |> 
+  mutate(source = if_else(id_classifier == 4, "frames", "records"))
+```
+
+So there are no individual records from `deployment 2` and no frames from `deployment 3`
+```{r}
+events_all_rwi |> 
+  count(source, id_deployment)
+```
+
+
+For `deployment 2` I have some records on events, and counted individuals on the `camera` level.
+So I will summarize my events to this level and bind the results of `deployment 2` with them.
+
+## 2.3 camera level
+### 2.3.1 import p02
+
+Let's prepare the camera records for `p02`
+```{r}
+observations_cameras_p02 <- 
+  read_csv("work/data_p02_record.csv")
+observations_cameras_p02 |> 
+  arrange(camera_name)
+```
+I want to rename the cameras so they comply to the other data.
+How to match strings with exactly one digit?
+```{r}
+test <- c("1", "01")
+str_detect(test, "^\\d$")
+```
+
+Need this for creating the results table of `deployment 2`
+```{r}
+observations_cameras_p02_tidy <- observations_cameras_p02 |> 
+  filter(!is.na(events)) |> 
+  select(!`individuals_p_event`) |> 
+  # rename cameras
+  mutate(camera_name = as.character(camera_name)) |> 
+  # add trailing 0 if only single digit 
+  mutate(camera_name = if_else(
+    # match exactly one digit is the regex "^\\d$"
+    str_detect(camera_name, "^\\d$"), str_replace(camera_name, "^", "lfb0"),
+    str_replace(camera_name, "^", "lfb")),
+    # and add the id_deployment for the join
+    id_deployment = 2,
+    # and classifier and source for later
+    id_classifier = 2,
+    source = "records")
+```
+
+
+ah yeah an get the id_cam also
+```{r}
+observations_cameras_p02_tidy <- 
+observations_cameras_p02_tidy |> 
+  left_join(cameras |> select(id_deployment, camera_name, id_cam, camera_name_old),
+            by = join_by(id_deployment, camera_name == camera_name_old)) |> 
+  select(id_cam,
+         id_classifier,
+         camera_name = camera_name.y,
+         id_deployment,
+         source,
+         events,
+         count = individuals
+         )
+```
+
+Okay and prepare it to be merged with the `observations`-table
+```{r}
+observations_cameras_p02_prep <- observations_cameras_p02_tidy |> 
+  mutate(
+    reference = "camera",
+    reference_id = id_cam
+  )
+observations_cameras_p02_prep
+```
+### 2.3.2 tidy and bind
+So let's see what we get on camera level for the events from the records
+```{r}
+events_all_rwi |> 
+  group_by(id_cam, id_classifier, source) |> 
+  reframe(events = n(),
+            count = sum(count)
+            )
+```
+
+Okay, bind those with the results from p02 and bring `camera_name` and `id_deployment` back
+```{r}
+events_all_rwi |> 
+  group_by(id_cam, id_classifier, source) |> 
+  reframe(events = n(),
+            count = sum(count)
+  ) |> 
+  left_join(cameras |> 
+              select(id_cam, camera_name, id_deployment),
+            by = "id_cam") |> 
+  mutate(reference = "camera",
+         reference_id = id_cam) |> 
+  # bind them together
+  bind_rows(observations_cameras_p02_prep)
+```
+
+and save as a new object
+```{r}
+observations_cameras_all <- events_all_rwi |> 
+  group_by(id_cam, id_classifier, source) |> 
+  reframe(events = n(),
+            count = sum(count)
+  ) |> 
+  left_join(cameras |> 
+              select(id_cam, camera_name, id_deployment),
+            by = "id_cam") |> 
+  mutate(reference = "camera",
+         reference_id = id_cam) |> 
+  # bind them together
+  bind_rows(observations_cameras_p02_prep)
+
+observations_cameras_all
+```
+
+
+### 2.3.3 visualize
+
+```{r}
+observations_cameras_all |> 
+  filter(id_cam <= 20) |> 
+  group_by(id_cam, id_classifier, source) |> 
+  summarise(events = sum(events),
+            count = sum(count),
+            group_size = count/events,
+            .groups = "drop") |> 
+  ggplot(aes(factor(id_cam), group_size, fill = factor(id_classifier))) +
+  geom_col(position = "dodge")
+```
+## 2.4 deployment level
+### 2.4.1 join summarise bind
+
+Now for the deployment level.
+I can calculate by deployment, as before by camera.
+
+```{r}
+observations_cameras_all |> 
+  group_by(id_deployment, source, id_classifier) |> 
+  reframe(events = sum(events),
+            count = sum(count))
+```
+But I can do that with the complete `observations` table anyways, so let's just bind `observations_cameras_all` and `observations_thesis_prep` together
+
+### 2.4.2 tidy
+For `thesis` I will add the `source` manually, and can derive `id_classifier` and `id_deployment` from `reference_id`.
+Not statistically sound, but works in this case.
+```{r}
+observations_cameras_all |> 
+  rename(reference_name = camera_name) |> 
+  select(!id_cam) |> 
+  bind_rows(observations_thesis_prep |>
+              # add source, and get deployment, and classifier from reference_id
+              mutate(source = "thesis",
+                     id_deployment = reference_id,
+                     id_classifier = reference_id)) |> 
+  view()
+```
+
+I see, that I should get the deploy-, error-, and trapping days for the cameras first. 
+
+### 2.4.3 Trapping Days
+Ultimately I want to compare the density estimates and for that I need the `trapping days`.
+These are the sum of days deployed minus the days not working.
+I can get the not working days from `cameras`
+```{r}
+observations_cameras_all |>
+  # adding them from the select function within the join
+  left_join(
+    cameras |>
+      select(
+        id_cam,
+        error1_start,
+        error1_end,
+        deploy_start,
+        deploy_end
+      ),
+    by = "id_cam"
+  )
+```
+
+From there I would mutate in the deploy-, error- and trapping days
+```{r}
+observations_cameras_all |>
+  left_join(
+    cameras |>
+      select(
+        id_cam,
+        error1_start,
+        error1_end,
+        deploy_start,
+        deploy_end
+      ),
+    by = "id_cam"
+  ) |>
+  # calculate trapping days
+  mutate(
+    deploy_days = deploy_end - deploy_start,
+    error_days = error1_end - error1_start,
+    trapping_days = deploy_days - error_days
+  )
+```
+We get a lot of `NA` because of the the `error` columns.
+Lets try replacing these with `0`
+```{r}
+observations_cameras_all |>
+  left_join(
+    cameras |>
+      select(
+        id_cam,
+        error1_start,
+        error1_end,
+        deploy_start,
+        deploy_end
+      ),
+    by = "id_cam"
+  ) |>
+  mutate(
+    deploy_days = deploy_end - deploy_start,
+    # replace NA with 0
+    error_days = replace_na(error1_end - error1_start, 0),
+    trapping_days = deploy_days - error_days
+  )
+
+```
+
+This does not work because the columns are Type `date.`
+Okay, convert them `as.numeric()`.
+```{r}
+observations_cameras_all |>
+  left_join(
+    cameras |>
+      select(
+        id_cam,
+        error1_start,
+        error1_end,
+        deploy_start,
+        deploy_end
+      ),
+    by = "id_cam"
+  ) |>
+  # added as.numeric here
+  mutate(
+    deploy_days = as.numeric(deploy_end - deploy_start),
+    error_days = as.numeric(error1_end - error1_start),
+    trapping_days = as.numeric(deploy_days - error_days)
+  )
+```
+
+Ah yeah still `NA` because the `error`- columns are `NA` to begin with.
+Let's see if the `replace_na()` will work after the numeric conversion.
+```{r}
+observations_cameras_all |>
+  left_join(
+    cameras |>
+      select(
+        id_cam,
+        error1_start,
+        error1_end,
+        deploy_start,
+        deploy_end
+      ),
+    by = "id_cam"
+  ) |>
+  mutate(
+    deploy_days = as.numeric(deploy_end - deploy_start),
+    # replace na after numeric conversion
+    error_days = replace_na(
+      as.numeric(error1_end - error1_start), 0),
+    trapping_days = as.numeric(deploy_days - error_days)
+  )
+```
+
+Good, now prep it an bind with the thesis observations.
+I don't need the start and end dates anymore, whom I can loose with `select()`.
+I also need to rename `camera_name` to `reference_name` so it matches my goals.
+And I don't need the `id_cam` anymore as it is represented by `reference_id`
+```{r}
+observations_cameras_all |>
+  left_join(
+    cameras |>
+      select(
+        id_cam,
+        error1_start,
+        error1_end,
+        deploy_start,
+        deploy_end
+      ),
+    by = "id_cam"
+  ) |>
+  mutate(
+    deploy_days = as.numeric(deploy_end - deploy_start),
+    error_days = replace_na(
+      as.numeric(error1_end - error1_start), 0),
+    trapping_days = as.numeric(deploy_days - error_days)
+  ) |> 
+  # loose columns error1_start, ..end, deploy_start, ...end, and id_cam
+  select(!c(error1_start,
+            error1_end,
+            deploy_start,
+            deploy_end,
+            id_cam)
+         ) |> 
+  rename(reference_name = camera_name) |> 
+  bind_rows(observations_thesis_prep |>
+              # add source, and get deployment, and classifier from reference_id
+              mutate(source = "thesis",
+                     id_deployment = reference_id,
+                     id_classifier = reference_id))
+```
+
+And save it as a new object.
+```{r}
+observations_raw <- 
+  observations_cameras_all |>
+  left_join(
+    cameras |>
+      select(
+        id_cam,
+        error1_start,
+        error1_end,
+        deploy_start,
+        deploy_end
+      ),
+    by = "id_cam"
+  ) |>
+  mutate(
+    deploy_days = as.numeric(deploy_end - deploy_start),
+    error_days = replace_na(
+      as.numeric(error1_end - error1_start), 0),
+    trapping_days = as.numeric(deploy_days - error_days)
+  ) |> 
+  # loose columns error1_start, ..end, deploy_start, ...end, and id_cam
+  select(!c(error1_start,
+            error1_end,
+            deploy_start,
+            deploy_end,
+            id_cam)
+         ) |> 
+  rename(reference_name = camera_name) |> 
+  bind_rows(observations_thesis_prep |>
+              # add source, and get deployment, and classifier from reference_id
+              mutate(source = "thesis",
+                     id_deployment = reference_id,
+                     id_classifier = reference_id))
+```
+
+
+# calculate Group sizes and REM, also see how I can classify `original` vs. `reproduction`
+So for better comparison I will add a `type` with the `case_when()` function.
+Here are the cases:
+- if reference is camera and id_classifier is 2 it' an original
+- if reference is camera and source is records and id_classifier is not 2 it's a original
+- if reference is camera and source is frames it's a reproduction
+- if reference it deployment it's an original
+
+```{r}
+observations_raw |>
+  mutate(type = case_when(
+    reference == "camera" & id_classifier == 2  ~ "original",
+    reference == "camera" & source == "records" & id_classifier != 2 ~ "original",
+    reference == "camera" & source == "frames" ~ "reproduction",
+    reference == "deployment" ~ "original"
+  )) |>
+  count(id_deployment, reference, source)
+  
+```
+
+Now I can see that not all originals have a reproduction.
+I'm missing some cameras and I need to calculate the deployment levels.
+I know, that I can't reproduce the cameras for deployment 3 because the frames are missing.
+An for the deployment level I can actually calculate reproduction from records and frames respectively.
+```{r}
+observations_deployments_repro <- observations_raw |>
+  mutate(type = case_when(
+    reference == "camera" & id_classifier == 2  ~ "original",
+    reference == "camera" & source == "records" & id_classifier != 2 ~ "original",
+    reference == "camera" & source == "frames" ~ "reproduction",
+    reference == "deployment" ~ "original"
+  )) |> 
+  filter(reference != "deployment") |> 
+  group_by(id_deployment, reference, source) |> 
+  reframe(events = sum(events),
+            count = sum(count),
+            error_days = sum(error_days),
+            deploy_days = sum(deploy_days),
+            trapping_days = deploy_days - error_days,
+            group_size = count / events,
+            rem_density_1 = REM_v1(
+              events_n = events,
+              trapdays_n = trapping_days,
+              group_size = group_size
+              ),
+            rem_density_2 = REM_v2(
+              events_n = events,
+              trapdays_n = trapping_days,
+              group_size = group_size
+              ),
+            type = "reproduction",
+            reference = "deployment"
+            )
+
+```
+
+# 3. TODO-  Explore
+
+Now I can bring them back in with the other observations and compare them.
+```{r}
+observations_deployments_repro |> 
+  bind_rows(observations_raw |> 
+              filter(reference == "deployment")) |>
+  ggplot(aes(
+    as.factor(id_deployment), 
+    rem_density_1, 
+    fill = source)) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(label = round(rem_density_1, 2)),
+    position = position_dodge(.9),
+    vjust = 1.5,
+    color = "grey20") +
+  scale_fill_brewer(palette = "Pastel1")
+```
+
+So there is quite some offset between those.
+I can plot the bars for each input variable and see where the most difference stems from.
+```{r}
+observations_deployments_repro |> 
+  bind_rows(observations_raw |> 
+              filter(reference == "deployment")) |>
+  pivot_longer(c(events:trapping_days)) |> 
+  ggplot(aes(id_deployment, round(value, 2), fill = source)) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(label = round(value, 2)),
+    position = position_dodge(.9),
+    vjust = 1.5,
+    color = "grey20") +
+  scale_fill_brewer(palette = "Pastel1") +
+  facet_wrap(~name,
+             scales = "free")
+```
+## 3.1 Deployment_1
+The reproduction and thesis results for `deployment_1` are pretty off.
+Let's look on that on the `camera` level.
+```{r}
+observations_raw |> 
+  filter(id_deployment == 1 & reference == "camera") |> 
+  pivot_longer(events:count) |> 
+  ggplot(aes(as.factor(reference_name), value, fill = source)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~name, scales = "free") 
+```
+Okay, let's look for example at the events of camera d3 for that timeframe.
+```{r}
+events_all_rwi |> 
+  filter(id_deployment == 1, camera_name == "b1") |>
+#  group_by(source) |> 
+ # summarise(events = n(),
+  #          count = sum(count),
+   #         .groups = "drop"
+    #        )|> 
+  ggplot(aes(as.factor(date),  count, fill = source)) +
+  geom_col(position = "dodge")
+
+events_all_rwi |> 
+  group_by(id_deployment, camera_name) |> 
+  summarise(days = n_distinct(date)) |> 
+  arrange(id_deployment, desc(days))
+
+events_all_rwi |>
+  filter(id_deployment == 1) |>
+  group_by(camera_name, date, source) |> 
+  reframe(count = sum(count),
+          n = n()) |>
+  ggplot(aes(factor(date), count, fill = source)) +
+  geom_col(position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  +
+  facet_wrap(vars(camera_name), scales = "free")
+
+```
+I figured that `camtrapR` defines independent Events differently, whether you set it to `lastIndependenRecord` or `lastRecord`.
+I created `events_all_rwi` with `lastIndependentRecord` and for comparison a re-exported deployment_01 with `lastRecord`.
+We get different results for the rotwild events.
+```{r}
+events_all_rwi |> 
+  filter(id_deployment == 1 & camera_name == "d3" & date == "2019-04-21" )
+
+events_frames_01 |> 
+  filter(Camera == "d3" & Date == "2019-05-03")
+```
+## 3.2 Deployment_2
+## 3.3 Deployment_3
+
+
+# OLD
+Good now summarise it again.
+The `trapping_days` from the cameras are still in a `time` format, which does not fit with the `numeric` of the thesis results,
+ so I convert them before the calculation.
+```{r}
+observations_cameras_all |>
+  left_join(cameras |> 
+              select(id_cam,
+                     error1_start,
+                     error1_end,
+                     deploy_start,
+                     deploy_end
+                     ),
+            by = "id_cam") |> 
+  mutate(error_days = error1_end - error1_start,
+         trapping_days = if_else(is.na(error_days),
+                                 deploy_end - deploy_start,
+                                 (deploy_end - deploy_start) - error_days)
+  )|> 
+  group_by(id_deployment, id_classifier, source) |> 
+  reframe(
+    events = sum(events),
+    count = sum(count),
+    group_size = count/events,
+    # gotta add the sum for the trap days, as numeric
+    trapping_days = sum(as.numeric(trapping_days)),
+    error_days = sum(as.numeric(error_days), na.rm = TRUE)) |> 
+  bind_rows(observations_thesis |>
+              mutate(source = "thesis")) |> 
+  mutate(id_classifier = if_else(source == "thesis",
+                                 id_deployment,
+                                 id_classifier))
+```
+
+Ah yeah and actually I can calculate `REM_Density` in this step aswell.
+It would be statistically more sound to do that for each camera and then get the average, but for comparison I'll do it at this level.
+```{r}
+observations_cameras_all |>
+  left_join(cameras |> 
+              select(id_cam,
+                     error1_start,
+                     error1_end,
+                     deploy_start,
+                     deploy_end
+                     ),
+            by = "id_cam") |> 
+  mutate(error_days = error1_end - error1_start,
+         trapping_days = if_else(is.na(error_days),
+                                 deploy_end - deploy_start,
+                                 (deploy_end - deploy_start) - error_days)
+  )|> 
+  group_by(id_deployment, id_classifier, source) |> 
+  reframe(
+    events = sum(events),
+    count = sum(count),
+    group_size = count/events,
+    trapping_days = sum(as.numeric(trapping_days)),
+    error_days = sum(as.numeric(error_days), na.rm = TRUE),
+    # here comes the `REM_Density`calculation
+    density_v01 = REM_v1(
+      events_n = events,
+      trapdays_n = trapping_days,
+      group_size = group_size),
+    density_v02 = REM_v2(
+      events_n = events,
+      trapdays_n = trapping_days,
+      group_size = group_size)
+    ) |> 
+  bind_rows(observations_thesis |>
+              mutate(source = "thesis")) |> 
+  mutate(id_classifier = if_else(source == "thesis",
+                                 id_deployment,
+                                 id_classifier))
+```
+
+Good,
+make it an Object and give it a name.
+```{r}
+# safe as an object
+observations_deployments_all <-
+  observations_cameras_all |>
+  left_join(cameras |> 
+              select(id_cam,
+                     error1_start,
+                     error1_end,
+                     deploy_start,
+                     deploy_end
+                     ),
+            by = "id_cam") |> 
+  mutate(error_days = error1_end - error1_start,
+         trapping_days = if_else(is.na(error_days),
+                                 deploy_end - deploy_start,
+                                 (deploy_end - deploy_start) - error_days)
+  )|> 
+  group_by(id_deployment, id_classifier, source) |> 
+  reframe(
+    events = sum(events),
+    count = sum(count),
+    group_size = count/events,
+    trapping_days = sum(as.numeric(trapping_days)),
+    error_days = sum(as.numeric(error_days), na.rm = TRUE),
+    # here comes the `REM_Density`calculation
+    density_v01 = REM_v1(
+      events_n = events,
+      trapdays_n = trapping_days,
+      group_size = group_size),
+    density_v02 = REM_v2(
+      events_n = events,
+      trapdays_n = trapping_days,
+      group_size = group_size)
+    ) |> 
+  bind_rows(observations_thesis |>
+              mutate(source = "thesis")) |> 
+  mutate(id_classifier = if_else(source == "thesis",
+                                 id_deployment,
+                                 id_classifier))
+```
+
+
+```{r}
+observations_deployments_all
+```
+
+### 2.4.3 visualize
+```{r}
+observations |>
+  # ah yeah and for this one filter the reclassification part out
+  filter(id_classifier != 4) |>
+  ggplot(aes(as.factor(id_deployment), density_v01, fill = as.factor(source))) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(label = round(density_v01, 2)),
+    color = "grey15",
+    size = 3,
+    vjust = 1.5,
+    position = position_dodge(.9)
+  ) +
+  scale_fill_brewer(palette = "Pastel1") +
+  ylab("Stk. / 100 ha") +
+  xlab("Periode")
+```
+
+# 3. Explore Data
+## 3.1 Boxplots of `count` to get a feel for the median, an mean which is used for the `group_size` and eventually makes a big portion of the density estimates
+```{r}
+events_all_rwi |> 
+  ggplot(
+    aes(factor(id_deployment), count,
+        fill = as.factor(id_deployment))
+  ) +
+  geom_boxplot() +
+    stat_summary(fun = "mean", geom = "point", shape = 23, size = 3, fill = "grey79") +
+  scale_fill_brewer(palette = "Pastel1")
+```
+
+We see, that none of the medians and means are close to each other. So It would be more advisable to use the median instead, as the datasets are left skewed. Or at least not normally distributed
+
+```{r}
+events_all_rwi |> 
+  ggplot(aes(count, y = after_stat(density))) +
+  geom_histogram(
+    aes(fill = as.factor(id_deployment)),
+    color = "grey60",
+    binwidth = 1,
+    linewidth = .2) +
+  geom_density(color = "grey33") +
+  facet_wrap(~id_deployment) +
+  scale_fill_brewer(palette = "Pastel1")
+```
+
+Test Normality
+
+```{r}
+events_all_rwi |> 
+  group_by(id_deployment, id_classifier) |> 
+  summarise(normality_p = shapiro.test(count)$p.value,
+            .groups = "drop")
+
+events_all_rwi |> 
+  group_by(id_deployment, id_classifier) |> 
+  reframe(mean = mean(count),
+          median = median(count)
+          )
+```

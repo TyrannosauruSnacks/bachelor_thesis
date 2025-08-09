@@ -1,0 +1,69 @@
+---
+title: "bachelorthesis_03_tidy_data"
+author: "Max Hachemeister"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# 1. prepare and bind the events from the records with those from the frames
+## 1.1 starting with the events from the frames
+```{r}
+# rwi is already filtered
+events_frames_rwi_tidy <- events_frames_rwi |> 
+  # select columns and change names to fit with `events_records`
+  select(
+    id_deployment,
+    camera_name = Camera,
+    station_name = Station,
+    date = Date,
+    time = Time,
+    count = metadata_count,
+    id_classifier) |>
+  # conform columns `count` and `time`
+  mutate(
+    count = as.numeric(count),
+    # need to call a special package here, as lubridate makes it a duration object
+    time = hms::parse_hms(time)
+    )|> 
+  # bring in the camera_id from `cameras`
+    left_join(cameras
+            |> select(
+              id_cam,
+              id_deployment,
+              camera_name,
+              camera_name_old),
+            by = join_by(id_deployment, camera_name))
+
+events_frames_rwi_tidy
+```
+
+
+## 1.2 now the frames from the records
+```{r}
+events_records_rwi_tidy <-
+  events_records |>
+  # only rows where rotwild was counted
+  filter(!is.na(n_rwi)) |>
+  # select columns of interest
+  select(id_cam, date, time, count = n_rwi, id_classifier) |>
+  # conform columns
+  # join id_cam, id_deployment and camera_name and station_name from `cameras`
+  left_join(cameras |>
+              select(id_deployment, camera_name, station_name, camera_name_old, id_cam),
+            by = join_by(id_cam))
+
+events_records_rwi_tidy
+```
+
+# 2. bind both and save them as `events_all_rwi`
+```{r}
+events_all_rwi <- events_records_rwi_tidy |> 
+  bind_rows(events_frames_rwi_tidy)
+
+events_all_rwi
+```
