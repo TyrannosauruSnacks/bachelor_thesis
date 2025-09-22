@@ -14,20 +14,26 @@ theme_set(theme_light())
 
 
 # 1 Organising raw camera trap images
+
 ## 1.1 createStationFolders
 
-define input and output directories for later functions
-be aware that camtraR functions don't like `~` as path to directory
+Define input and output directories for later functions.
+Be aware that camtrapR functions don't like `~` as path to directory.
+
 ```{r}
+
 indir_deployment_01 <- "./raw/deployment_01"
 outdir_deployment_01 <- "./work/deployment_01"
 
 indir_deployment_02 <- "./raw/deployment_02"
 outdir_deployment_02 <- "./work/deployment_02"
+
 ```
 
-create folder structure representing the data from cameras
+Create folder structure representing the data from cameras.
+
 ```{r}
+
 createStationFolders(
   inDir = indir_deployment_01,
   stations = cameras$station_name,
@@ -40,24 +46,29 @@ createStationFolders(
   stations = cameras$station_name,
   cameras = cameras$camera_name,
   createinDir = TRUE
-))
+)
+
 ```
 
 ## 1.2 move raw data into input directories
+
 You gotta do that manually.
-Maybe a script can do that aswell. Bur preferably it would be done ad hoc
+Maybe a script can do that as well.
+But preferably it would be done ad hoc.
 
 # 2 Shift date and time of images
-## 2.1 am/pm -issues
-you have to solve the am/pm issue first, because the timeshift is applied correctly for cases like 23:00 + 01:00 . E.g it becomes the next day. Therefore all times that are >23:00, but are supposed to be 11:00, would wrongly skip a day. So if you'd correct am/pm after the daylight saving time correction these images would be off.
 
-So solve am/pm first.
+## 2.1 am/pm -issues
+
+You have to solve the am/pm issue first, because the timeshift is applied correctly for cases like 23:00 + 01:00, e.g. it becomes the next day. Therefore all times that are > 23:00, but are supposed to be 11:00, would wrongly skip a day. So if you'd correct am/pm after the daylight saving time correction, these images would be off.
+
+So  solve am/pm first.
 Which means:
 
 - all entries <= 11:59 get + 12:00
 - all entries >= 12:00 get - 12:00
 
-I did this manually with DigiKam, because camtrapR uses the original Time for filenames.
+I did this manually with DigiKam, because camtrapR uses the original time for file names.
 And the metadata should be correct anyways.
 
 - [ ] Maybe write a function for that some day.
@@ -65,38 +76,64 @@ And the metadata should be correct anyways.
 ## 2.1 create table with timeshifts to be corrected
 
 Calculate difference between dates of `e1` (formerly `lfb12`) for the known batches.
+
 ```{r}
+
 ymd("2019.07.22") - ymd("2019.12.15")
 ymd( "2019.08.27") - ymd("2019.04.03")
 
 ymd_hms("2019.07.22 13.0.0") - ymd_hms("2019.12.15 14.0.0")
+
 ```
 
 How many hours are 146 days, minus the one hour to get to DST
+
 ```{r}
+
 146*24-1
+
 ```
 
 do we get the expected result?
+
 ```{r}
+
 ymd_hms("2019.12.15 13.0.0") - hms("3503.00.00")
+
 ```
 
-### 2.1.1 Alrighty, let's create the timeshift table for `deployment_01`
+### 2.1.1 Timeshift table for `deployment_01`
+
 ```{r}
-timeshift_deployment_01 <- cameras |>
+
+timeshift_deployment_01 <-
+  cameras |>
   filter(id_deployment == 1) |>
   select(!id_deployment:model) |>
   mutate(
-    timeshift = if_else(camera_name == "e1", "0:0:0 3503:0:0",
-          if_else(daylight_saving_time == "0", "0:0:0 1:0:0", NA)
-          ),
-    sign = if_else(camera_name == "e1","-",
-        if_else(daylight_saving_time == "0", "+", NA)
+    timeshift = 
+      if_else(
+        camera_name == "e1", 
+        "0:0:0 3503:0:0", 
+        if_else(
+          daylight_saving_time == "0",
+          "0:0:0 1:0:0", 
+          NA
         )
-    )|>
-  filter(!is.na(timeshift)) |> 
-  select( station_name, camera_name, camera_name_old, timeshift, sign)
+      ),
+    sign = 
+      if_else(
+        camera_name == "e1",
+        "-",
+        if_else(
+          daylight_saving_time == "0",
+          "+", 
+          NA
+        )
+      )
+  ) |>
+  filter(!is.na(timeshift)) |>
+  select(station_name, camera_name, camera_name_old, timeshift, sign)
 
 # check result
 timeshift_deployment_01
@@ -106,7 +143,9 @@ timeshift_deployment_01
 2.2.2 create timeshift table for `deployment_02`
 
 check what was noted on lfb08
+
 ```{r}
+
 cameras |> 
   filter(camera_name == "a3" & id_deployment == 2) |> 
   select(!id_deployment:model)
@@ -114,88 +153,126 @@ cameras |>
 ## check whether the days from june to july are 30
 ymd("2019.08.19") - ymd("2019.07.19")
 ymd("2019.07.19") + 31
+
 ```
 
 Okay, so the timeshift table for `period_02` is a bit different
+
 ```{r}
-timeshift_deployment_02 <- cameras |>
+
+timeshift_deployment_02 <- 
+  cameras |>
   filter(id_deployment == 2) |>
   select(!id_deployment:model) |>
   mutate(
-    timeshift = if_else(camera_name == "e1","0:0:0 3503:0:0",
-      if_else(camera_name == "a3",
-              # oddly directly per month does not seem to work, so do it by days
-              "0:0:31 0:0:0",
-              if_else(daylight_saving_time == "0", "0:0:0 1:0:0", NA))
+    timeshift = 
+      if_else(
+        camera_name == "e1",
+        "0:0:0 3503:0:0",
+        if_else(
+          camera_name == "a3",
+          # oddly directly per month does not seem to work, so do it by days
+          "0:0:31 0:0:0",
+          if_else(
+            daylight_saving_time == "0", 
+            "0:0:0 1:0:0",
+            NA
+          )
+        )
       ),
-    sign = if_else(camera_name == "e1","-",
-      ifelse(camera_name == "a3","+",
-          if_else(daylight_saving_time == "0", "+", NA))
+    sign = 
+      if_else(
+        camera_name == "e1",
+        "-",
+      ifelse(
+        camera_name == "a3",
+        "+",
+        if_else(
+          daylight_saving_time == "0",
+          "+", 
+          NA
+        )
       )
-    )|> 
+    )
+  )|> 
   filter(!is.na(timeshift)) |> 
   select(station_name, camera_name, camera_name_old, timeshift, sign)
 
 # check result
 timeshift_deployment_02 |> 
   arrange(camera_name)
+
 ```
 
 ## 2.2 time shift the images
 
 ```{r}
+
 # timeshift p01
-timeshift_run_01 <-timeShiftImages(
-  inDir = indir_deployment_01,
-  hasCameraFolders = TRUE,
-  timeShiftTable = timeshift_deployment_01,
-  stationCol = "station_name",
-  cameraCol = "camera_name",
-  timeShiftSignColumn = "sign",
-  timeShiftColumn = "timeshift",
-  undo = FALSE,
-  ignoreMinorErrors = TRUE
-)
+timeshift_run_01 <- 
+  timeShiftImages(
+    inDir = indir_deployment_01,
+    hasCameraFolders = TRUE,
+    timeShiftTable = timeshift_deployment_01,
+    stationCol = "station_name",
+    cameraCol = "camera_name",
+    timeShiftSignColumn = "sign",
+    timeShiftColumn = "timeshift",
+    undo = FALSE,
+    ignoreMinorErrors = TRUE
+  )
 
 # timeshift p02
-timeshift_run_02 <- timeShiftImages(
-  inDir = indir_deployment_02,
-  hasCameraFolders = TRUE,
-  timeShiftTable = timeshift_deployment_02,
-  stationCol = "station_name",
-  cameraCol = "camera_name",
-  timeShiftSignColumn = "sign",
-  timeShiftColumn = "timeshift",
-  undo = FALSE,
-  ignoreMinorErrors = TRUE
-)
+timeshift_run_02 <- 
+  timeShiftImages(
+    inDir = indir_deployment_02,
+    hasCameraFolders = TRUE,
+    timeShiftTable = timeshift_deployment_02,
+    stationCol = "station_name",
+    cameraCol = "camera_name",
+    timeShiftSignColumn = "sign",
+    timeShiftColumn = "timeshift",
+    undo = FALSE,
+    ignoreMinorErrors = TRUE
+  )
 
 # check result
 timeshift_run_01
 timeshift_run_02
+
 ```
 
 # 3 Rename and copy raw images
+
 Now I should be able to merge the two periods into one folder, because in the renaming process their filenames will be distinct. But maybe i will check that after the images have been renamed, so now I will just put them in their outdirs respectively.
 
 ```{r}
-renaming_table_p01 <- imageRename(inDir = indir_deployment_01,
-                                  outDir = outdir_deployment_01,
-                                  hasCameraFolders = TRUE,
-                                  copyImages = TRUE,
-                                  writecsv = FALSE,
-                                  keepCameraSubfolders = TRUE)
 
-renaming_table_p02 <- imageRename(inDir = indir_deployment_02,
-                                  outDir = outdir_deployment_02,
-                                  hasCameraFolders = TRUE,
-                                  copyImages = TRUE,
-                                  writecsv = FALSE,
-                                  keepCameraSubfolders = TRUE)
+renaming_table_p01 <-
+  imageRename(
+    inDir = indir_deployment_01,
+    outDir = outdir_deployment_01,
+    hasCameraFolders = TRUE,
+    copyImages = TRUE,
+    writecsv = FALSE,
+    keepCameraSubfolders = TRUE
+  )
+
+renaming_table_p02 <-
+  imageRename(
+    inDir = indir_deployment_02,
+    outDir = outdir_deployment_02,
+    hasCameraFolders = TRUE,
+    copyImages = TRUE,
+    writecsv = FALSE,
+    keepCameraSubfolders = TRUE
+  )
+
 ```
 
 I will leave it as is. I can just work with the data from here. 
 Could be a problem if you need to tag the images like that.
+
 - [ ] Maybe check sometime later.
 
 Now you would tag the images within `digiKam` and write these metadata to the files.
@@ -205,50 +282,66 @@ If you see this error, go back to `digiKam` and correct the frames with missing 
 
 # 4 extract events from the frames' metadata
 
-leave timezone UTC, as Niedballa explained:
-"[...]it is advised to set argument `timeZone` to your study area’s time zone (one of OlsonNames()),
-unless the time zone of your study area has DST, but your cameras don’t record it."
+leave timezone UTC, as CamtrapR documentation states:
+"[...]it is advised to set argument `timeZone` to your study area’s time zone (one of OlsonNames()), unless the time zone of your study area has DST, but your cameras don’t record it."
 
 ```{r}
-events_frames_01 <- recordTable(
-  inDir = outdir_deployment_01,
-  IDfrom = "metadata",
-  metadataSpeciesTag = "species",
-  cameraID = "directory",
-  camerasIndependent = TRUE,
-  minDeltaTime = 30,
-  deltaTimeComparedTo = "lastIndependentRecord",
-  timeZone = "UTC"
-)
 
-events_frames_02 <- recordTable(
-  inDir = outdir_deployment_02,
-  IDfrom = "metadata",
-  metadataSpeciesTag = "species",
-  cameraID = "directory",
-  camerasIndependent = TRUE,
-  minDeltaTime = 30,
-  deltaTimeComparedTo = "lastIndependentRecord",
-  timeZone = "UTC"
-)
+events_frames_01 <- 
+  recordTable(
+    inDir = outdir_deployment_01,
+    IDfrom = "metadata",
+    metadataSpeciesTag = "species",
+    cameraID = "directory",
+    camerasIndependent = TRUE,
+    minDeltaTime = 30,
+    deltaTimeComparedTo = "lastIndependentRecord",
+    timeZone = "UTC"
+  )
+
+events_frames_02 <- 
+  recordTable(
+    inDir = outdir_deployment_02,
+    IDfrom = "metadata",
+    metadataSpeciesTag = "species",
+    cameraID = "directory",
+    camerasIndependent = TRUE,
+    minDeltaTime = 30,
+    deltaTimeComparedTo = "lastIndependentRecord",
+    timeZone = "UTC"
+  )
+
 ```
 
 ## 4.1 Prepare record tables of the period
+
 add deployment id
+
 ```{r}
-events_frames_01 <- events_frames_01 |> 
+
+events_frames_01 <- 
+  events_frames_01 |>
   mutate(id_deployment = 1)
 
-events_frames_02 <- events_frames_02 |> 
-   mutate(id_deployment = 2)
+events_frames_02 <- 
+  events_frames_02 |> 
+  mutate(id_deployment = 2)
+
 ```
 
 bind tables together, filter for species `rotwild` and add `id_classifier`
+
 ```{r}
-events_frames_rwi <- bind_rows(events_frames_01, events_frames_02) |>
+
+events_frames_rwi <-
+  bind_rows(
+    events_frames_01,
+    events_frames_02
+  ) |>
   filter(metadata_species == "rotwild") |> 
   mutate(id_classifier = 4)
 
 events_frames_rwi |>
   filter(Camera == "e1")
+
 ```
