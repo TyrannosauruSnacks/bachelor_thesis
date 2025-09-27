@@ -14,7 +14,7 @@ theme_set(theme_light())
 
 # 1 import Data
 
-The data from the other bachelor thesis' were stored in spreadsheets. As a first step I merged them togehter and collected some other information several sheets, which I did in `libre office`. However I would like to work as much as possible in R, to preserve the raw data as much as possible, aswell as the reproducibility of my work.
+The data from the other bachelor thesis' were stored in spreadsheets. As a first step I merged them together and collected some other information from several sheets, which I did in `libre office`. However I would like to work as much as possible in R to preserve the raw data, aswell as the reproducibility of my work.
 
 So here I start from this still pretty raw `.ods` file.
 
