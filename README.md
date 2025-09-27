@@ -1,4 +1,4 @@
 # Begleitende Daten und Codes
 
-## zur Bachelorarbeit:
+zur Bachelorarbeit:
 **Reproduktion der Fotofallenstudien des Rotwildbestandes im Landeswaldrevier Finowtal**
