@@ -1,6 +1,5 @@
-## Begleitende Daten und Codes
-
-zur Bachelorarbeit **"Reproduktion der Fotofallenstudien des Rotwildbestandes im Landeswaldrevier Finowtal"**
+## Begleitende Daten und Codes zur Bachelorarbeit
+### "Reproduzierbarkeit ausgewählterFotofallenstudien zur Schätzung des Rotwildbestandes im Landeswaldrevier Finowtal"
 
 ## Infos
 
