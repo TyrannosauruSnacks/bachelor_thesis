@@ -1,12 +1,11 @@
-# Begleitende Daten und Codes
+## Revised Notebooks and data for the bachelor's thesis
 
-zur Bachelorarbeit:
-**Reproduktion der Fotofallenstudien des Rotwildbestandes im Landeswaldrevier Finowtal**
+### "Reproduzierbarkeit ausgewählter Fotofallenstudien zur Schätzung des Rotwildbestandes im Landeswaldrevier Finowtal"
 
-## Wichtig
+## Info
 
-Der Code wurde stellenweise nach dem offiziellen Abgabedatum unbedacht geändert.
-Bitte die "commit history" nutzen, um den zeitlich korrekten Zustand bewerten zu können.
+The notebooks are written in english.
 
-Von nun an (2025-09-27), werden weitere Änderungen in einem extra "branch" oder "fork" gesichtert.
-Ich werde den Code noch anpassen, um Ihn für zukünftiges Interesse brauchbarer und übersichtlicher zu machen.
+Click the files with the `.md` extension to view them directly in your browser.
+
+If you are interested in the source data, please send me a [mail](mailto:mha673@hnee.de).
