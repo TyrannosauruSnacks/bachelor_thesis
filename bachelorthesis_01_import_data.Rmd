@@ -1,8 +1,8 @@
 ---
-title: "bachelor_prep_data"
+title: "Prepare Data"
 author: "Max Hachemeister"
 date: "`r Sys.Date()`"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
@@ -115,8 +115,6 @@ rename_cameras <- tribble(
   "lfb02", "a4"
 )
 
-rename_cameras
-
 ```
 
 And then join it with the `cameras`, copy the `camera_name` values to a new column and write the `new_name` values to `camera_name`.
@@ -190,10 +188,10 @@ cameras |>
         legend.justification = c("right", "bottom")
         )
 
-ggsave("./export/kameras_neu.png",
-       units = "mm",
-       width = 140,
-       height = 78.75)
+#ggsave("./export/kameras_neu.png",
+#       units = "mm",
+#       width = 140,
+#       height = 78.75)
 ```
 
 ## 2.3 join `deployment` and `cameras`
